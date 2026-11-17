@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pulse</title>
+<meta name="description" content="정해진 간격으로 마우스와 키보드를 대신 누르고, 녹화한 동작을 그대로 반복하는 Windows 오토마우스">
+<link rel="icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&display=swap">
+<style>
+/* Lapse 사이트와 같은 뼈대(넓은 Archivo + G마켓 산스, 가는 선, 큰 숫자)에 Pulse의 리퀴드 글래스와 파란 빛을 얹었다.
+   히어로(페이지가 스스로 클릭하는 숫자) → 직접 눌러 보는 자동 클릭 화면 → 세 가지 기능 + 미니 플레이어 → 단축키 → 설치 → 질문 → 큰 PULSE */
+@font-face { font-family: "Arc"; src: url(fonts/ArchivoVariable.ttf) format("truetype"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
+@font-face { font-family: "GM"; src: url(fonts/GmarketSansLight.ttf) format("truetype"); font-weight: 300; font-display: swap; }
+@font-face { font-family: "GM"; src: url(fonts/GmarketSansMedium.ttf) format("truetype"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "GM"; src: url(fonts/GmarketSansBold.ttf) format("truetype"); font-weight: 700; font-display: swap; }
+:root {
+  --bg: #08080a;
+  --rule: rgba(255, 255, 255, 0.08);
+  --ink: #f5f5f7;
+  --mute: #8e8e96;
+  --faint: #55555c;
+  --blue: #0a84ff;
+  --blue-hi: #5aaeff;
+  --red: #ff453a;
+  --green: #30d158;
+  --wide: "Arc", "GM", system-ui, sans-serif;
+  --ko: "GM", "Arc", "Malgun Gothic", system-ui, sans-serif;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  /* 리퀴드 글래스 (앱의 GlassBrush · RimBrush와 같은 값) */
+  --glass: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.063) 45%, rgba(255,255,255,.043));
+  --rim: linear-gradient(180deg, rgba(255,255,255,.36), rgba(255,255,255,.07) 45%, rgba(255,255,255,.14));
+  --btn: linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.1) 45%, rgba(255,255,255,.08));
+  --accent-glass: linear-gradient(180deg, #5aaeff, #1a87ff 48%, #0a6ff0);
+  --red-glass: linear-gradient(180deg, #ff7f76, #ff4b40 48%, #e3352b);
+  --white-rim: linear-gradient(180deg, rgba(255,255,255,.5), rgba(255,255,255,.1) 45%, rgba(255,255,255,.2));
+  color-scheme: dark;
+}
+html[lang="en"] { --ko: "Geist", "Arc", system-ui, sans-serif; }
+html[lang="en"] .hero h1, html[lang="en"] .block h2 { letter-spacing: -0.045em; font-weight: 500; }
+html[lang="en"] .steps b, html[lang="en"] .faq summary { letter-spacing: -0.02em; }
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--ko); font-weight: 300; font-size: 16px; line-height: 1.75; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+p, h1, h2, h3, ul, ol, dl, dd { margin: 0; }
+ul, ol { list-style: none; padding: 0; }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
+.cap { font-family: var(--wide); font-stretch: 125%; font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: var(--mute); font-weight: 500; }
+
+/* 유리 테두리: 위 가장자리에 빛이 맺히고 아래는 약하게 반사 */
+.rim { position: relative; }
+.rim::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; background: var(--rim); pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.rim.white::before { background: var(--white-rim); }
+
+/* 페이지 뒤 은은한 색 빛 (유리가 비칠 바탕) */
+.aurora { position: fixed; inset: -20vmax; z-index: -1; pointer-events: none; filter: blur(90px); opacity: .55;
+  background:
+    radial-gradient(28vmax 28vmax at 18% 22%, rgba(10,132,255,.35), transparent 70%),
+    radial-gradient(24vmax 24vmax at 82% 30%, rgba(124,92,255,.28), transparent 70%),
+    radial-gradient(30vmax 22vmax at 60% 85%, rgba(0,180,255,.16), transparent 70%); }
+
+/* ---------- 상단 */
+.top { position: fixed; top: 0; left: 0; right: 0; z-index: 30; padding-top: env(safe-area-inset-top, 0px); transition: background .5s, backdrop-filter .5s; }
+.top.scrolled { background: rgba(8,8,10,.55); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); box-shadow: 0 1px 0 var(--rule); }
+.top .wrap { display: flex; align-items: center; height: 68px; gap: 36px; }
+.mark { display: flex; align-items: center; gap: 12px; font-family: var(--wide); font-stretch: 125%; font-weight: 700; letter-spacing: .32em; font-size: 13px; text-decoration: none; }
+.mark img { width: 26px; height: 26px; }
+.nav { display: flex; gap: 30px; margin-left: auto; }
+.nav a { font-family: var(--wide); font-stretch: 125%; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; text-decoration: none; position: relative; padding-block: 6px; color: #fff; opacity: .8; transition: opacity .3s; }
+.nav a:hover { opacity: 1; }
+.nav a::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: #fff; transform: scaleX(0); transform-origin: right; transition: transform .6s var(--ease); }
+.nav a:hover::after { transform: scaleX(1); transform-origin: left; }
+.lang { display: flex; align-items: center; gap: 8px; }
+.lang button { font-family: var(--wide); font-stretch: 125%; font-size: 11px; letter-spacing: .2em; background: none; border: 0; padding: 6px 2px; cursor: pointer; opacity: .45; transition: opacity .4s; }
+.lang button[aria-pressed="true"], .lang button:hover { opacity: 1; }
+.lang span { opacity: .3; font-size: 11px; }
+
+/* ---------- 캡슐 버튼 (누르면 꾹 눌렸다가 탄력 있게 돌아온다) */
+.btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 999px; cursor: pointer; text-decoration: none; white-space: nowrap;
+  font-family: var(--ko); font-weight: 500; font-size: 15px; padding: 15px 26px; color: var(--ink); background: var(--btn);
+  box-shadow: 0 2px 10px rgba(0,0,0,.18); transition: transform .5s var(--spring), box-shadow .4s, filter .3s; }
+.btn::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #fff; opacity: 0; transition: opacity .25s; }
+.btn:hover::after { opacity: .09; }
+.btn:active { transform: scale(.95); transition-duration: .1s; }
+.btn.primary { color: #fff; background: var(--accent-glass); box-shadow: 0 4px 22px rgba(10,132,255,.45); font-weight: 700; }
+.btn.primary:hover { box-shadow: 0 6px 30px rgba(10,132,255,.6); }
+.btn.red { color: #fff; background: var(--red-glass); box-shadow: 0 4px 20px rgba(255,69,58,.4); }
+.btn svg { width: 16px; height: 16px; position: relative; z-index: 1; }
+.btn span { position: relative; z-index: 1; }
+.btn small { font-family: var(--wide); font-stretch: 112%; font-size: 11px; font-weight: 500; opacity: .8; position: relative; z-index: 1; }
+.btn.big { font-size: 16px; padding: 18px 30px; }
+.kbd { display: inline-grid; place-items: center; min-width: 26px; height: 22px; padding: 0 6px; border-radius: 7px; font-family: var(--wide); font-stretch: 112%; font-size: 11px; font-weight: 500; background: rgba(255,255,255,.16); position: relative; }
+
+/* ---------- 히어로: 페이지가 스스로 클릭한다 */
+.hero { position: relative; padding-block: 150px 70px; overflow: hidden; }
+.hero .meta { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.live { display: inline-flex; align-items: center; gap: 10px; }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); display: block; box-shadow: 0 0 12px var(--blue); transition: background .3s, box-shadow .3s; }
+.live.off i { background: var(--faint); box-shadow: none; }
+.counter-row { position: relative; margin-top: 26px; }
+.counter { font-family: var(--wide); font-stretch: 125%; font-weight: 200; font-size: clamp(56px, 13vw, 196px); line-height: .9; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.counter .lo { color: var(--faint); }
+.cursor { position: absolute; right: 6%; top: 50%; width: 46px; height: 46px; translate: 0 -40%; pointer-events: none; transition: translate .9s var(--ease); }
+.cursor svg { width: 100%; height: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,.5)); transition: transform .12s; }
+.cursor.tap svg { transform: scale(.86); }
+.ripple { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; pointer-events: none; border: 2px solid var(--blue); animation: ring .7s var(--ease) forwards; }
+.ripple.dot { border: 0; background: var(--blue); animation: dot .45s ease-out forwards; }
+@keyframes ring { from { transform: scale(.4); opacity: .95; } to { transform: scale(5.4); opacity: 0; } }
+@keyframes dot { from { transform: scale(1); opacity: .9; } to { transform: scale(.2); opacity: 0; } }
+.drawline { height: 1px; background: var(--rule); margin-top: 34px; transform-origin: left; }
+.hero .below { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 40px; margin-top: 34px; align-items: end; }
+.hero h1 { font-weight: 500; font-size: clamp(30px, 4.2vw, 58px); line-height: 1.22; letter-spacing: -0.03em; text-wrap: balance; }
+.hero h1 span { color: var(--faint); }
+.hero .side { display: grid; gap: 22px; justify-items: start; }
+.hero .side p { color: var(--mute); max-width: 36ch; }
+@media (prefers-reduced-motion: no-preference) {
+  .settle { animation: settle 2.2s var(--ease) both; }
+  .settle.d1 { animation-delay: .15s; }
+  @keyframes settle { from { letter-spacing: .18em; filter: blur(4px); } }
+  .drawline { animation: draw 2.4s var(--ease) .3s both; }
+  @keyframes draw { from { transform: scaleX(0); } }
+}
+
+/* ---------- 직접 눌러 보는 Pulse 화면 */
+.stage { padding-block: 30px 120px; }
+.stage .hint { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.win { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 0; border-radius: 16px; overflow: hidden; min-height: 600px;
+  background: rgba(24,24,28,.62); backdrop-filter: blur(40px) saturate(1.5); -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  box-shadow: 0 60px 120px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.08); font-size: 14px; font-weight: 300; user-select: none; -webkit-user-select: none; }
+.pane { position: relative; margin: 10px; border-radius: 22px; background: linear-gradient(180deg, rgba(255,255,255,.1), rgba(255,255,255,.05) 45%, rgba(255,255,255,.031)); box-shadow: 0 6px 26px rgba(0,0,0,.28); display: flex; flex-direction: column; padding: 0 10px 10px; }
+.lights { display: flex; gap: 12px; padding: 18px 8px 0; }
+.lights i { width: 14px; height: 14px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 .6px rgba(0,0,0,.18); }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 18px 8px 16px; }
+.brand img { width: 40px; height: 40px; }
+.brand b { display: block; font-family: var(--wide); font-stretch: 112%; font-weight: 700; font-size: 16px; line-height: 1.2; letter-spacing: .02em; }
+.brand small { color: var(--mute); font-size: 11.5px; }
+.navs { position: relative; display: grid; gap: 2px; }
+.navs .sel { position: absolute; left: 0; right: 0; height: 38px; border-radius: 19px; background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.1) 45%, rgba(255,255,255,.08)); box-shadow: 0 2px 8px rgba(0,0,0,.16); transition: transform .45s var(--spring); }
+.nv { position: relative; display: flex; align-items: center; gap: 11px; height: 38px; padding: 0 8px; border-radius: 19px; border: 0; background: none; cursor: pointer; font-weight: 500; font-size: 14px; text-align: left; transition: background .2s; }
+.nv:hover { background: rgba(255,255,255,.05); }
+.tile { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; box-shadow: inset 0 0 0 .8px rgba(255,255,255,.35); flex: none; }
+.tile svg { width: 13px; height: 13px; }
+.t-blue { background: linear-gradient(180deg, #5fb4ff, #1c86ff 50%, #0a62e0); }
+.t-purple { background: linear-gradient(180deg, #c3a2ff, #9467ff 50%, #6c3fe0); }
+.t-red { background: linear-gradient(180deg, #ff8a80, #ff4f45 50%, #e0302a); }
+.t-gray { background: linear-gradient(180deg, #a8a8ae, #7c7c82 50%, #56565b); }
+.navs hr { border: 0; height: 1px; background: rgba(255,255,255,.1); margin: 8px 10px; }
+.status { margin-top: auto; border-radius: 18px; background: var(--glass); padding: 14px 12px 10px 14px; }
+.status .st { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: #b0b0b8; line-height: 1.45; min-height: 36px; }
+.status .st i { width: 8px; height: 8px; border-radius: 50%; background: #787880; margin-top: 5px; flex: none; transition: background .3s, box-shadow .3s; }
+.status .st.on i { background: var(--blue); box-shadow: 0 0 0 4px rgba(10,132,255,.2); }
+.status .btn { width: 100%; margin-top: 10px; padding: 9px 12px; font-size: 13px; }
+.main { position: relative; padding: 30px 30px 96px; min-width: 0; }
+.main h3 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }
+.main .sub { color: var(--mute); font-size: 13.5px; }
+.sect { font-size: 13px; font-weight: 700; margin: 22px 0 9px 6px; }
+.card { border-radius: 18px; background: var(--glass); box-shadow: 0 6px 26px rgba(0,0,0,.22); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 58px; margin-left: 18px; padding: 10px 16px 10px 0; border-bottom: 1px solid rgba(255,255,255,.1); }
+.row:last-child { border-bottom: 0; }
+.row .lb { font-size: 14px; font-weight: 500; }
+.row .lb small { display: block; color: var(--mute); font-size: 12px; font-weight: 300; }
+.seg { position: relative; display: inline-flex; padding: 2px; border-radius: 16px; background: rgba(0,0,0,.14); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+.seg .thumb { position: absolute; top: 2px; bottom: 2px; left: 0; width: 0; border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,.2) 45%, rgba(255,255,255,.17)); box-shadow: 0 2px 8px rgba(0,0,0,.22), inset 0 0 0 1px rgba(255,255,255,.25); transition: transform .42s var(--spring), width .42s var(--spring); }
+.seg button { position: relative; border: 0; background: none; height: 28px; padding: 0 13px; font-size: 12.5px; font-weight: 500; color: #b0b0b8; cursor: pointer; border-radius: 14px; transition: color .2s; }
+.seg button[aria-pressed="true"], .seg button:hover { color: var(--ink); }
+.interval { display: flex; align-items: center; gap: 10px; }
+.interval input { width: 86px; height: 32px; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); background: rgba(0,0,0,.12); color: var(--ink); text-align: right; padding: 0 12px; font-family: var(--wide); font-stretch: 112%; font-size: 13px; font-weight: 500; }
+.interval input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(10,132,255,.35); }
+.slide { display: flex; align-items: center; gap: 14px; margin: 0 16px 0 18px; padding: 0 0 16px; color: var(--mute); font-size: 11px; }
+.slide input { flex: 1; -webkit-appearance: none; appearance: none; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--blue) var(--fill, 50%), rgba(120,120,128,.25) var(--fill, 50%)); cursor: pointer; }
+.slide input::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 22px; border-radius: 11px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3), inset 0 0 0 .5px rgba(0,0,0,.1); transition: transform .3s var(--spring); }
+.slide input:active::-webkit-slider-thumb { transform: scaleX(1.18); }
+.slide input::-moz-range-thumb { width: 30px; height: 22px; border-radius: 11px; background: #fff; border: 0; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.count-row { display: none; }
+.count-row.on { display: flex; }
+.bar { position: absolute; left: 22px; right: 22px; bottom: 16px; display: flex; align-items: center; gap: 10px; padding: 9px 9px 9px 20px; border-radius: 26px;
+  background: linear-gradient(180deg, rgba(42,42,48,.3), rgba(32,32,36,.25) 45%, rgba(32,32,36,.28)); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: 0 6px 26px rgba(0,0,0,.28); }
+.bar .tip { margin-right: auto; color: #b0b0b8; font-size: 12.5px; }
+.bar .btn { padding: 9px 16px; font-size: 13.5px; }
+.bar .btn[disabled] { opacity: .38; cursor: default; }
+.bar .btn[disabled]::after { display: none; }
+.bar .ic { width: 12px; height: 12px; }
+.fixed-mark { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 1.5px dashed rgba(10,132,255,.9); pointer-events: none; display: none; }
+.fixed-mark.on { display: block; }
+.fixed-mark::after { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: var(--blue); }
+.demo-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 16px; }
+.panic-toast { position: absolute; left: 50%; top: 22px; translate: -50% -10px; opacity: 0; padding: 10px 18px; border-radius: 20px; background: rgba(42,42,48,.9); font-size: 13px; font-weight: 500; transition: opacity .3s, translate .5s var(--spring); pointer-events: none; z-index: 5; white-space: nowrap; }
+.panic-toast.on { opacity: 1; translate: -50% 0; }
+
+/* ---------- 기능 */
+.block { border-top: 1px solid var(--rule); padding-block: 130px; }
+.block h2 { font-weight: 500; font-size: clamp(32px, 4.4vw, 60px); line-height: 1.2; letter-spacing: -0.035em; max-width: 18ch; text-wrap: balance; margin-top: 22px; }
+.lines { margin-top: 70px; border-top: 1px solid var(--rule); }
+.line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 32px; padding: 36px 0; border-bottom: 1px solid var(--rule); position: relative; align-items: start; }
+.line::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(10,132,255,.06), transparent); transform: scaleX(0); transform-origin: left; transition: transform .9s var(--ease); pointer-events: none; }
+.line:hover::before { transform: scaleX(1); }
+.line .t { font-family: var(--wide); font-stretch: 125%; font-weight: 300; font-size: clamp(28px, 4vw, 54px); text-transform: uppercase; letter-spacing: -0.01em; line-height: 1; transition: transform .9s var(--ease), letter-spacing .9s var(--ease); }
+.line:hover .t { transform: translateX(14px); letter-spacing: .02em; }
+.line p { color: var(--mute); max-width: 48ch; }
+.line p b { color: var(--ink); font-weight: 500; }
+.line .extra { margin-top: 22px; }
+/* 매크로: 녹화한 동작을 쉬운 말로 */
+.acts { border-radius: 18px; background: var(--glass); padding: 6px 0; max-width: 460px; font-size: 14px; }
+.act { display: flex; align-items: center; gap: 12px; padding: 8px 18px; opacity: 0; transform: translateY(8px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
+.acts.in .act { opacity: 1; transform: none; }
+.act .ico { width: 24px; height: 24px; border-radius: 7px; background: rgba(255,255,255,.1); display: grid; place-items: center; flex: none; }
+.act .ico svg { width: 12px; height: 12px; }
+.act span { color: var(--mute); font-family: var(--wide); font-stretch: 112%; font-size: 12px; }
+.act time { margin-left: auto; color: var(--faint); font-family: var(--wide); font-stretch: 112%; font-size: 12px; }
+/* 미니 플레이어 */
+.mini { display: inline-flex; align-items: center; gap: 12px; padding: 7px 7px 7px 10px; border-radius: 30px; background: linear-gradient(180deg, rgba(60,60,68,.7), rgba(36,36,42,.7)); box-shadow: 0 12px 34px rgba(0,0,0,.45); font-size: 13.5px; font-weight: 500; flex-wrap: nowrap; max-width: 100%; }
+.mini img { width: 32px; height: 32px; }
+.mini .modes { display: flex; gap: 2px; padding: 2px; border-radius: 16px; background: rgba(0,0,0,.18); }
+.mini .modes i { width: 34px; height: 28px; border-radius: 14px; display: grid; place-items: center; }
+.mini .modes i.on { background: rgba(255,255,255,.22); }
+.mini .modes svg { width: 14px; height: 14px; }
+.mini .dotx { width: 8px; height: 8px; border-radius: 50%; background: #787880; }
+.mini .btn { padding: 8px 16px; font-size: 13px; }
+
+/* ---------- 단축키 */
+.keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 70px; }
+.key { border-radius: 26px; padding: 30px 28px 26px; background: var(--glass); box-shadow: 0 10px 34px rgba(0,0,0,.3); transition: transform .5s var(--spring), box-shadow .4s; }
+.key .cap-k { display: grid; place-items: center; width: 108px; height: 92px; border-radius: 20px; font-family: var(--wide); font-stretch: 125%; font-weight: 300; font-size: 40px;
+  background: linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.08)); box-shadow: 0 8px 0 rgba(0,0,0,.35), 0 12px 24px rgba(0,0,0,.35); transition: transform .12s, box-shadow .12s; }
+.key.hit .cap-k { transform: translateY(6px); box-shadow: 0 2px 0 rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.35); }
+.key.k-red .cap-k { background: var(--red-glass); }
+.key h3 { font-weight: 500; font-size: 20px; margin-top: 34px; letter-spacing: -0.02em; }
+.key p { color: var(--mute); font-size: 15px; margin-top: 4px; }
+.keys-note { color: var(--mute); margin-top: 28px; font-size: 14px; }
+
+/* ---------- 설치 · 질문 */
+.install { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 64px; margin-top: 70px; }
+.spec div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+.spec div:first-child { border-top: 1px solid var(--rule); }
+.spec dt { color: var(--faint); font-family: var(--wide); font-stretch: 125%; font-size: 10px; letter-spacing: .2em; text-transform: uppercase; padding-top: 5px; }
+.dls { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.steps { counter-reset: s; border-top: 1px solid var(--rule); }
+.steps li { display: grid; grid-template-columns: 64px minmax(0, 1fr); padding: 26px 0; border-bottom: 1px solid var(--rule); }
+.steps li::before { counter-increment: s; content: "0" counter(s); font-family: var(--wide); font-stretch: 125%; font-size: 13px; color: var(--faint); padding-top: 4px; }
+.steps b { font-weight: 500; font-size: 18px; display: block; letter-spacing: -0.02em; }
+.steps p { color: var(--mute); font-size: 15px; margin-top: 4px; }
+.k { font-weight: 500; font-size: 13px; border: 1px solid var(--rule); border-radius: 6px; padding: 1px 8px; white-space: nowrap; color: var(--ink); }
+.faq { margin-top: 70px; border-top: 1px solid var(--rule); }
+.faq details { border-bottom: 1px solid var(--rule); }
+.faq summary { cursor: pointer; list-style: none; padding: 26px 0; display: flex; justify-content: space-between; gap: 24px; font-size: 19px; font-weight: 500; letter-spacing: -0.02em; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font-family: var(--wide); font-weight: 200; font-size: 26px; line-height: 1; color: var(--mute); transition: transform .6s var(--ease); }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq details p { color: var(--mute); padding: 0 0 28px; max-width: 64ch; }
+.path { font-family: var(--wide); font-stretch: 100%; font-size: 13px; color: var(--ink); word-break: break-all; }
+
+/* ---------- 끝: 큰 PULSE */
+.closing { border-top: 1px solid var(--rule); padding-block: 120px 48px; overflow: hidden; }
+.bigw { --x: 0; font-family: var(--wide); font-stretch: 125%; font-weight: 800; font-size: clamp(110px, 30vw, 460px); line-height: .82; letter-spacing: -0.04em; white-space: nowrap; transform: translateX(calc(var(--x) * 1px)); will-change: transform; }
+.bigw span { color: transparent; -webkit-text-stroke: 1px rgba(255,255,255,.25); }
+.bigw em { font-style: normal; background: linear-gradient(180deg, #5aaeff, #0a6ff0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 32px; margin-top: 56px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bigw { --x: 0 !important; }
+  .act { opacity: 1; transform: none; }
+}
+@media (max-width: 920px) {
+  .hero .below, .install, .line { grid-template-columns: minmax(0, 1fr); }
+  .nav { display: none; }
+  .lang { margin-left: auto; }
+  .win { grid-template-columns: minmax(0, 1fr); }
+  .win .pane { display: none; }
+  .keys { grid-template-columns: minmax(0, 1fr); }
+  .block { padding-block: 90px; }
+  .cursor { display: none; }
+}
+@media (max-width: 560px) {
+  .hero { padding-block: 120px 50px; }
+  .main { padding: 22px 14px 150px; }
+  .row { flex-wrap: wrap; margin-left: 14px; padding-right: 12px; }
+  .bar { flex-wrap: wrap; left: 12px; right: 12px; }
+  .bar .tip { width: 100%; }
+  .btn.big { font-size: 15px; padding: 16px 22px; }
+  .top .wrap { gap: 16px; }
+  .mini .modes { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"></div>
+
+<header class="top" id="topbar">
+  <div class="wrap">
+    <a class="mark" href="#top"><img src="logo.png" alt="">PULSE</a>
+    <nav class="nav" aria-label="페이지 안 이동">
+      <a href="#try">Try</a>
+      <a href="#features">Features</a>
+      <a href="#keys">Keys</a>
+      <a href="#faq">FAQ</a>
+      <a href="#install">Download</a>
+    </nav>
+    <div class="lang" role="group" aria-label="Language"><button type="button" data-l="ko" aria-pressed="true">KO</button><span>/</span><button type="button" data-l="en" aria-pressed="false">EN</button></div>
+  </div>
+</header>
+
+<main id="top">
+  <!-- 히어로: 페이지가 스스로 클릭하고, 그 횟수가 큰 숫자로 쌓인다. F8을 누르면 멈춘다. -->
+  <section class="hero" id="hero">
+    <div class="wrap">
+      <div class="meta">
+        <span class="cap live" id="heroLive"><i></i><span id="heroState">Auto-clicking · every 0.25 s</span></span>
+        <span class="cap" data-en="Press F8 to stop">F8을 누르면 멈춰요</span>
+      </div>
+      <div class="counter-row" id="counterRow">
+        <div class="counter settle" id="counter" aria-label="이 페이지가 클릭한 횟수">00,000</div>
+        <div class="cursor" id="cursor" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3v15.5l4.2-3.6 2.8 6.1 2.9-1.3-2.8-6h5.6Z" fill="#fff" stroke="#1c1c1f" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="drawline"></div>
+      <div class="below">
+        <h1 class="settle d1" data-en-html="The same click, over and over —<br><span>let Pulse do it.</span>">똑같은 클릭은,<br><span>이제 Pulse가 합니다.</span></h1>
+        <div class="side">
+          <p data-en="A Windows auto clicker that presses the mouse and keyboard for you at a steady pace, and replays what you record exactly as you did it.">정해진 간격으로 마우스와 키보드를 대신 누르고, 녹화한 동작을 그대로 반복하는 Windows 오토마우스.</p>
+          <a class="btn primary big rim white js-dl-setup" href="#install"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13m0 0 5-5m-5 5-5-5M5 21h14"/></svg><span data-en="Download for Windows">Windows용 다운로드</span></a>
+          <span class="cap">v1.0.0 · Windows 10 / 11 · Free</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 직접 눌러 보기: 앱의 자동 클릭 화면을 그대로 옮겼다. 시작하면 마우스가 있는 곳에 물결이 퍼진다. -->
+  <section class="stage" id="try">
+    <div class="wrap">
+      <div class="hint">
+        <span class="cap" data-en="Try it · this is the real screen, working">직접 눌러 보세요 · 실제 화면 그대로 움직여요</span>
+        <span class="cap" data-en="Start · F6 &nbsp;/&nbsp; Emergency stop · F8">시작 · F6 &nbsp;/&nbsp; 비상 정지 · F8</span>
+      </div>
+      <div class="win" id="win">
+        <aside class="pane rim">
+          <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="brand"><img src="logo.png" alt=""><div><b>PULSE</b><small data-en="Auto clicker · Macro">오토마우스 · 매크로</small></div></div>
+          <div class="navs" id="navs">
+            <div class="sel rim" id="navSel"></div>
+            <button class="nv" data-nav="0"><span class="tile t-blue"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg></span><span data-en="Auto Clicker">자동 클릭</span></button>
+            <button class="nv" data-nav="1"><span class="tile t-purple"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span><span data-en="Auto Keyboard">자동 키보드</span></button>
+            <button class="nv" data-nav="2"><span class="tile t-red"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="#fff"/></svg></span><span data-en="Macro">매크로</span></button>
+            <hr>
+            <button class="nv" data-nav="3"><span class="tile t-gray"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></span><span data-en="Settings">설정</span></button>
+          </div>
+          <div class="status rim">
+            <div class="st" id="st"><i></i><span id="stText">준비됨</span></div>
+            <button class="btn rim" id="panicBtn" type="button"><span data-en="Emergency stop">비상 정지</span><span class="kbd">F8</span></button>
+          </div>
+        </aside>
+        <div class="main" id="demoArea">
+          <h3 data-en="Auto Clicker">자동 클릭</h3>
+          <p class="sub" data-en="Clicks the mouse for you at a steady pace">정해진 간격으로 마우스를 대신 눌러 줍니다</p>
+          <div class="sect" data-en="Click">클릭</div>
+          <div class="card rim">
+            <div class="row"><span class="lb" data-en="Mouse button">클릭 버튼</span>
+              <div class="seg" id="segBtn"><span class="thumb"></span><button aria-pressed="true" data-en="Left">왼쪽</button><button aria-pressed="false" data-en="Right">오른쪽</button><button aria-pressed="false" data-en="Middle">가운데</button></div></div>
+            <div class="row" style="border-bottom:0"><span class="lb"><span data-en="Click interval">클릭 간격</span><small id="rateText">1초에 약 10번 클릭해요</small></span>
+              <span class="interval"><input id="ivInput" inputmode="decimal" value="0.1" aria-label="클릭 간격 (초)"><span data-en="sec">초마다</span></span></div>
+            <div class="slide"><span data-en="Faster">빠르게</span><input type="range" id="ivSlider" min="0" max="1000" value="500" aria-label="클릭 간격"><span data-en="Slower">느리게</span></div>
+          </div>
+          <div class="sect" data-en="Position & repeat">위치와 반복</div>
+          <div class="card rim">
+            <div class="row"><span class="lb" data-en="Where to click">클릭 위치</span>
+              <div class="seg" id="segPos"><span class="thumb"></span><button aria-pressed="true" data-en="Where the mouse is">마우스가 있는 곳</button><button aria-pressed="false" data-en="A fixed spot">정해둔 곳</button></div></div>
+            <div class="row"><span class="lb" data-en="Repeat">반복 횟수</span>
+              <div class="seg" id="segRep"><span class="thumb"></span><button aria-pressed="true" data-en="Until stopped">멈출 때까지</button><button aria-pressed="false" data-en="Set a count">횟수 정하기</button></div></div>
+            <div class="row count-row" id="countRow"><span class="lb" data-en="How many clicks?">몇 번 클릭할까요?</span>
+              <span class="interval"><input id="countInput" inputmode="numeric" value="50" aria-label="클릭 횟수"><span data-en="times">번</span></span></div>
+          </div>
+          <div class="bar rim">
+            <span class="tip" data-en="Start and stop with hotkeys too">단축키로도 시작하고 멈출 수 있어요</span>
+            <button class="btn rim" id="pauseBtn" type="button" disabled><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><span id="pauseLabel">일시정지</span></button>
+            <button class="btn rim" id="stopBtn" type="button" disabled><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span data-en="Stop">정지</span></button>
+            <button class="btn primary rim white" id="startBtn" type="button"><svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5Z"/></svg><span data-en="Start">시작</span><span class="kbd">F6</span></button>
+          </div>
+        </div>
+        <div class="demo-layer" id="layer"><div class="fixed-mark" id="fixedMark"></div></div>
+        <div class="panic-toast" id="panicToast">모든 작업을 멈췄어요</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <span class="cap">Features</span>
+      <h2 data-en="Three things, done without a manual.">설명서 없이, 세 가지를.</h2>
+      <div class="lines">
+        <div class="line"><div class="t">Click</div><p data-en-html="Left, right or middle, from <b>1,000 times a second down to once an hour</b>. Click where the mouse is or at a spot you pick, until you stop or a set number of times. Double clicks, slightly uneven timing like a person, and a ripple wherever it clicks.">왼쪽 · 오른쪽 · 가운데 버튼을 <b>0.001초부터 1시간 간격</b>까지. 마우스가 있는 곳이나 정해 둔 곳을, 멈출 때까지 또는 정한 횟수만큼 누릅니다. 더블 클릭, 사람처럼 살짝 다른 간격, 클릭하는 자리에 퍼지는 물결도 고를 수 있습니다.</p></div>
+        <div class="line"><div class="t">Keys</div><p data-en-html="Press a key — <b>with Ctrl, Alt or Shift</b> if you like — at a steady pace, or type a whole line of text and hit Enter. Choose how long each press is held.">원하는 키를 <b>Ctrl · Alt · Shift 조합까지</b> 정해진 간격으로 누르거나, 글자를 통째로 입력하고 Enter까지 눌러 줍니다. 키를 누르고 있는 시간도 정할 수 있습니다.</p></div>
+        <div class="line"><div class="t">Macro</div><div><p data-en-html="Record what you do with the mouse and keyboard, and Pulse lists it <b>in plain words</b>. Name it, save it, load it later, and replay it as many times as you like, up to faster than you recorded.">마우스와 키보드로 한 일을 녹화하면 <b>쉬운 말로</b> 목록을 보여 줍니다. 이름을 붙여 저장하고, 나중에 불러와, 원하는 만큼 반복합니다. 녹화한 것보다 빠르게 재생할 수도 있습니다.</p>
+          <div class="extra"><div class="acts rim" id="acts">
+            <div class="act"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg></span><b data-en="Left click">왼쪽 클릭</b><span>(640, 410)</span><time>0:00.2</time></div>
+            <div class="act"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><b data-en="Wait 1.1 seconds">1.1초 기다리기</b><time>0:00.2</time></div>
+            <div class="act"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg></span><b data-en="Right click">오른쪽 클릭</b><span>(900, 300)</span><time>0:01.4</time></div>
+            <div class="act"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M7 14h10"/></svg></span><b data-en="Press Enter">Enter 키 누르기</b><time>0:01.9</time></div>
+            <div class="act"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg></span><b data-en="Scroll down 3">휠 아래로 3칸</b><span>(900, 300)</span><time>0:02.6</time></div>
+          </div></div></div></div>
+        <div class="line"><div class="t">Mini</div><div><p data-en-html="Shrink Pulse into a <b>small player that floats above everything</b>. Switch modes, see what it's about to do, and start or stop without opening the big window.">Pulse를 <b>화면 위에 떠 있는 작은 플레이어</b>로 줄입니다. 큰 창을 열지 않고도 모드를 바꾸고, 무엇을 할지 확인하고, 바로 시작하고 멈춥니다.</p>
+          <div class="extra"><div class="mini rim" aria-label="미니 플레이어 예시"><img src="logo.png" alt=""><span class="modes"><i class="on"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></svg></i><i><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M7 14h10"/></svg></i><i><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="#fff"/></svg></i></span><span class="dotx"></span><span id="miniText">왼쪽 클릭 · 0.1초마다</span><span class="kbd">F6</span><button class="btn primary rim white" type="button" id="miniStart"><span data-en="Start">시작</span></button></div></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="keys">
+    <div class="wrap">
+      <span class="cap">Hotkeys</span>
+      <h2 data-en="Three keys you'll remember.">기억할 키는 셋.</h2>
+      <div class="keys">
+        <div class="key rim" data-key="F6"><div class="cap-k">F6</div><h3 data-en="Start / stop">시작 / 정지</h3><p data-en="Starts and stops whatever you're looking at: clicking, keys or a macro.">보고 있는 화면의 자동 클릭 · 자동 키보드 · 매크로 재생을 시작하고 멈춥니다.</p></div>
+        <div class="key rim" data-key="F9"><div class="cap-k">F9</div><h3 data-en="Record / finish">녹화 시작 / 종료</h3><p data-en="Begins recording a macro, and ends it.">매크로 녹화를 시작하고 끝냅니다.</p></div>
+        <div class="key rim k-red" data-key="F8"><div class="cap-k">F8</div><h3 data-en="Emergency stop">비상 정지</h3><p data-en="Stops everything immediately, wherever you are.">어디서든 실행 중인 모든 작업을 바로 멈춥니다.</p></div>
+      </div>
+      <p class="keys-note" data-en="Any of them can be changed in Settings. Try F6 and F8 on this page.">세 키 모두 설정에서 바꿀 수 있어요. 이 페이지에서도 F6 · F8을 눌러 보세요.</p>
+    </div>
+  </section>
+
+  <section class="block" id="install">
+    <div class="wrap">
+      <span class="cap">Download</span>
+      <h2 data-en="Install it, or just run it.">설치해도, 그냥 켜도.</h2>
+      <div class="install">
+        <div>
+          <dl class="spec">
+            <div><dt>Version</dt><dd>1.0.0</dd></div>
+            <div><dt>Installer</dt><dd data-en="PulseSetup-1.0.0.exe · 12 MB · Start menu, uninstall from Settings">PulseSetup-1.0.0.exe · 12MB · 시작 메뉴 · 설정에서 제거</dd></div>
+            <div><dt>Portable</dt><dd data-en="Pulse-1.0.0-portable.zip · 3 MB · unzip and run">Pulse-1.0.0-portable.zip · 3MB · 압축만 풀면 실행</dd></div>
+            <div><dt>System</dt><dd data-en="Windows 10 · 11 (uses the .NET Framework already in Windows)">Windows 10 · 11 (Windows에 들어 있는 .NET Framework 사용)</dd></div>
+            <div><dt>Price</dt><dd data-en="Free · No ads · No sign-up">무료 · 광고 없음 · 가입 없음</dd></div>
+            <div><dt>Language</dt><dd data-en="Korean · English">한국어 · English</dd></div>
+          </dl>
+          <div class="dls">
+            <a class="btn primary big rim white js-dl-setup" href="#install"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v13m0 0 5-5m-5 5-5-5M5 21h14"/></svg><span data-en="Installer">설치 파일</span><small>.exe</small></a>
+            <a class="btn big rim js-dl-zip" href="#install"><span data-en="Portable">설치 없이</span><small>.zip</small></a>
+          </div>
+        </div>
+        <ol class="steps">
+          <li><div><b data-en="Download">받기</b><p data-en="Get the installer — or the zip if you'd rather not install anything.">설치 파일을 받습니다. 설치가 싫다면 zip을 받아 압축을 풀고 PULSE.exe를 켜면 끝입니다.</p></div></li>
+          <li><div><b data-en="If “Windows protected your PC” appears">"Windows의 PC 보호" 창이 뜨면</b><p data-en-html="Click <span class='k'>More info</span> → <span class='k'>Run anyway</span>. Pulse is a new independent app without code signing yet, so this shows the first time."><span class="k">추가 정보</span> → <span class="k">실행</span>을 누릅니다. 아직 코드 서명이 없는 새 개인 앱이라 처음 한 번 뜹니다.</p></div></li>
+          <li><div><b data-en="Install">설치</b><p data-en="Choose a desktop shortcut, launch after install and start with Windows, then click Install. No admin rights needed.">바탕화면 바로가기, 설치 후 실행, Windows 시작 시 자동 실행을 고르고 설치를 누르면 끝입니다. 관리자 권한은 필요 없습니다.</p></div></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="faq">
+    <div class="wrap">
+      <span class="cap">FAQ</span>
+      <h2 data-en="Questions.">자주 묻는 것.</h2>
+      <div class="faq">
+        <details><summary data-en="Is it really free?">정말 무료인가요?</summary><p data-en="Yes. No ads, no payments, no sign-up, and nothing is sent over the internet.">네. 광고도, 결제도, 회원가입도 없고, 인터넷으로 아무것도 보내지 않습니다.</p></details>
+        <details><summary data-en="Can I use it in games?">게임에서 써도 되나요?</summary><p data-en="Pulse works in any window, but many online games forbid auto clickers and macros in their terms and can suspend accounts for it. Check the game's rules first — the responsibility is yours.">어느 창에서나 동작하지만, 많은 온라인 게임은 약관에서 오토마우스 · 매크로를 금지하고 계정을 정지하기도 합니다. 먼저 그 게임의 규칙을 확인하세요. 사용에 대한 책임은 쓰는 분에게 있습니다.</p></details>
+        <details><summary data-en="What if it gets out of hand?">멈추지 않으면 어떡하죠?</summary><p data-en="Press F8 (emergency stop). It works from any window and stops every task at once. Pulse also never clicks on its own window.">F8(비상 정지)을 누르세요. 어떤 창에서든 모든 작업이 바로 멈춥니다. Pulse는 자기 창 위에서는 클릭하지 않습니다.</p></details>
+        <details><summary data-en="Where are my settings and macros?">설정과 매크로는 어디에 저장되나요?</summary><p data-en-html="In <span class='path'>%APPDATA%\PULSE</span>. Updating or uninstalling leaves them in place, and the portable version uses the same folder."><span class="path">%APPDATA%\PULSE</span>에 저장됩니다. 업데이트하거나 제거해도 그대로 남고, 설치 없이 쓰는 버전도 같은 폴더를 씁니다.</p></details>
+        <details><summary data-en="How do I update?">업데이트는 어떻게 하나요?</summary><p data-en="Download the new installer and run it. A running Pulse closes first and is replaced; your settings and macros stay.">새 설치 파일을 받아 다시 실행합니다. 켜져 있는 Pulse는 꺼진 뒤 새 버전으로 바뀌고, 설정과 매크로는 그대로 남습니다.</p></details>
+        <details><summary data-en="How do I uninstall it?">지우려면요?</summary><p data-en="Windows Settings → Apps → Installed apps → Pulse → Uninstall. For the portable version, just delete PULSE.exe.">Windows 설정 → 앱 → 설치된 앱 → Pulse → 제거. 설치 없이 쓰는 버전은 PULSE.exe를 지우면 됩니다.</p></details>
+        <details><summary data-en="Does it run on Mac or mobile?">Mac이나 휴대폰에서도 되나요?</summary><p data-en="Windows only, for now.">지금은 Windows 전용입니다.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="bigw" id="bigw" aria-hidden="true">PULSE <span>PULSE</span> <em>PULSE</em> <span>PULSE</span></div>
+    <div class="wrap foot">
+      <span class="cap">© 2026 Exstruo</span>
+      <span class="cap">Type · Archivo · Gmarket Sans · Geist</span>
+    </div>
+  </section>
+</main>
+
+<script>
+  // 다운로드 주소: 이 폴더를 그대로 올리면 downloads/ 안의 파일로 연결된다.
+  // GitHub Releases 등에 따로 올렸다면 여기에 그 주소를 넣으면 된다.
+  const DOWNLOADS = {
+    setup: "downloads/PulseSetup-1.0.0.exe",
+    zip: "downloads/Pulse-1.0.0-portable.zip",
+  };
+  document.querySelectorAll(".js-dl-setup").forEach((a) => { a.href = DOWNLOADS.setup; a.setAttribute("download", ""); });
+  document.querySelectorAll(".js-dl-zip").forEach((a) => { a.href = DOWNLOADS.zip; a.setAttribute("download", ""); });
+
+  const two = (n) => String(n).padStart(2, "0");
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (id) => document.getElementById(id);
+
+  // ---------------------------------------------------------------- 한국어 / 영어
+  const T = {
+    ko: { ready: "준비됨", clicking: (n, t) => `자동 클릭 중  ·  ${n}번  ·  ${t}`, paused: (n) => `일시정지  ·  ${n}번 클릭함`, done: (n) => `완료  ·  ${n}번 클릭했어요`, stopped: (n) => `정지  ·  ${n}번 클릭했어요`,
+          panic: "모든 작업을 멈췄어요", pause: "일시정지", resume: "계속", perSec: (v) => `1초에 약 ${v}번 클릭해요`, everySec: (v) => `${v}초에 한 번 클릭해요`, everyMin: (v) => `약 ${v}분에 한 번 클릭해요`,
+          ivErr: "0.001초부터 3600초 사이로 입력해 주세요", heroOn: (s) => `자동 클릭 중 · ${s}초마다`, heroOff: "멈춤 · F6으로 다시 시작", btn: ["왼쪽", "오른쪽", "가운데"], mini: (b, s) => `${b} 클릭 · ${s}초마다`,
+          ownWin: "Pulse 화면 위에서는 클릭하지 않아요. 마우스를 창 밖으로 옮겨 보세요." },
+    en: { ready: "Ready", clicking: (n, t) => `Clicking  ·  ${n}  ·  ${t}`, paused: (n) => `Paused  ·  ${n} clicks`, done: (n) => `Done  ·  ${n} clicks`, stopped: (n) => `Stopped  ·  ${n} clicks`,
+          panic: "Everything stopped", pause: "Pause", resume: "Resume", perSec: (v) => `About ${v} clicks a second`, everySec: (v) => `Once every ${v} s`, everyMin: (v) => `About once every ${v} min`,
+          ivErr: "Enter 0.001 to 3600 seconds", heroOn: (s) => `Auto-clicking · every ${s} s`, heroOff: "Stopped · F6 to restart", btn: ["Left", "Right", "Middle"], mini: (b, s) => `${b} click · every ${s} s`,
+          ownWin: "Pulse won't click on its own window. Move the mouse outside it." },
+  };
+  let L = T.ko;
+  const i18n = [...document.querySelectorAll("[data-en], [data-en-html]")];
+  i18n.forEach((el) => (el.dataset.ko = el.innerHTML));
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function setLang(lang) {
+    document.documentElement.lang = lang;
+    L = T[lang];
+    i18n.forEach((el) => { el.innerHTML = lang === "en" ? (el.dataset.enHtml ?? esc(el.dataset.en)) : el.dataset.ko; });
+    document.querySelectorAll(".lang button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.l === lang)));
+    try { localStorage.setItem("pulse-lang", lang); } catch (e) { /* 저장이 막혀 있으면 이번에만 */ }
+    refreshTexts();
+    document.querySelectorAll(".seg").forEach(placeThumb);
+  }
+
+  // ---------------------------------------------------------------- 히어로: 페이지가 스스로 클릭한다
+  const counterEl = $("counter"), cursor = $("cursor"), counterRow = $("counterRow");
+  let heroCount = 0, heroOn = true;
+  const HERO_EVERY = 0.25;
+  function drawCounter() {
+    const s = String(heroCount).padStart(5, "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const lead = s.match(/^[0,]*/)[0];  // 아직 안 찬 앞자리는 흐리게
+    counterEl.innerHTML = (lead ? `<span class="lo">${lead}</span>` : "") + s.slice(lead.length);
+  }
+  function ripple(parent, x, y, color) {
+    if (reduce) return;
+    for (const cls of ["ripple", "ripple dot"]) {
+      const r = document.createElement("span");
+      r.className = cls;
+      r.style.left = x + "px"; r.style.top = y + "px";
+      if (color) { r.style.borderColor = color; if (cls.includes("dot")) r.style.background = color; }
+      parent.appendChild(r);
+      r.addEventListener("animationend", () => r.remove());
+    }
+  }
+  function heroTick() {
+    if (!heroOn) return;
+    heroCount++;
+    drawCounter();
+    const cr = cursor.getBoundingClientRect(), pr = counterRow.getBoundingClientRect();
+    if (cr.width) {
+      cursor.classList.add("tap");
+      setTimeout(() => cursor.classList.remove("tap"), 110);
+      ripple(counterRow, cr.left - pr.left + cr.width * 0.22, cr.top - pr.top + cr.height * 0.14);
+    }
+    if (heroCount % 12 === 0 && !reduce) cursor.style.translate = `${(Math.random() * -60).toFixed(0)}px ${(-40 + (Math.random() * 30 - 15)).toFixed(0)}%`;
+  }
+  drawCounter();
+  setInterval(heroTick, HERO_EVERY * 1000);
+
+  // ---------------------------------------------------------------- 직접 눌러 보는 자동 클릭
+  const win = $("win"), area = $("demoArea"), layer = $("layer"), fixedMark = $("fixedMark");
+  const st = $("st"), stText = $("stText");
+  const startBtn = $("startBtn"), pauseBtn = $("pauseBtn"), stopBtn = $("stopBtn");
+  const ivInput = $("ivInput"), ivSlider = $("ivSlider"), countInput = $("countInput");
+  let interval = 0.1, btnIdx = 0, posIdx = 0, repIdx = 0;
+  let state = "idle", clicks = 0, startT = 0, pausedAt = 0, pausedTotal = 0, acc = 0, lastT = 0, lastSpawn = 0, lastMsg = "";
+  let mouse = null;  // 창 안 마우스 위치 (창 기준)
+  const fixedPt = { x: 0.72, y: 0.36 };  // '정해둔 곳' (창 크기 비율)
+  const BTN_COLOR = ["#0a84ff", "#bf5af2", "#30d158"];
+
+  // 미끄러지는 유리 손잡이
+  function placeThumb(seg) {
+    const on = seg.querySelector('button[aria-pressed="true"]');
+    const th = seg.querySelector(".thumb");
+    if (!on || !th) return;
+    th.style.width = on.offsetWidth + "px";
+    th.style.transform = `translateX(${on.offsetLeft}px)`;
+  }
+  function segInit(id, onPick) {
+    const seg = $(id);
+    seg.querySelectorAll("button").forEach((b, i) => b.addEventListener("click", () => {
+      seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      placeThumb(seg);
+      onPick(i);
+    }));
+    requestAnimationFrame(() => placeThumb(seg));
+  }
+  segInit("segBtn", (i) => { btnIdx = i; refreshTexts(); });
+  segInit("segPos", (i) => { posIdx = i; placeFixed(); });
+  segInit("segRep", (i) => { repIdx = i; $("countRow").classList.toggle("on", i === 1); });
+  addEventListener("resize", () => { document.querySelectorAll(".seg").forEach(placeThumb); placeFixed(); });
+  document.fonts && document.fonts.ready.then(() => document.querySelectorAll(".seg").forEach(placeThumb));
+
+  // 간격: 슬라이더는 0.01초 ~ 2초 (로그 눈금), 입력칸은 앱과 같이 0.001 ~ 3600초
+  const toSec = (v) => +(0.01 * Math.pow(200, v / 1000)).toPrecision(2);
+  const toSlider = (s) => Math.round(Math.log(Math.min(2, Math.max(0.01, s)) / 0.01) / Math.log(200) * 1000);
+  function fmtSec(s) { return s >= 1 ? String(+s.toFixed(2)) : String(+s.toPrecision(2)); }
+  function setInterval2(s, fromSlider) {
+    interval = s;
+    if (!fromSlider) ivSlider.value = toSlider(s);
+    ivSlider.style.setProperty("--fill", (100 - ivSlider.value / 10) + "%");
+    refreshTexts();
+  }
+  ivSlider.addEventListener("input", () => { const s = toSec(+ivSlider.value); ivInput.value = fmtSec(s); setInterval2(s, true); });
+  ivInput.addEventListener("input", () => {
+    const v = parseFloat(ivInput.value.replace(",", "."));
+    const ok = isFinite(v) && v >= 0.001 && v <= 3600;
+    ivInput.style.borderColor = ok ? "" : "var(--red)";
+    if (ok) setInterval2(v, false); else $("rateText").textContent = L.ivErr;
+  });
+  setInterval2(0.1, false);
+
+  function rateText(s) {
+    if (s < 1) return L.perSec(+(1 / s).toFixed(s < 0.1 ? 0 : 1));
+    if (s < 60) return L.everySec(+s.toFixed(2));
+    return L.everyMin(+(s / 60).toFixed(1));
+  }
+  function elapsed() { return ((state === "paused" ? pausedAt : performance.now()) - startT - pausedTotal) / 1000; }
+  function fmtTime(t) { t = Math.floor(t); return Math.floor(t / 60) + ":" + two(t % 60); }
+  function refreshTexts() {
+    $("rateText").textContent = rateText(interval);
+    $("miniText").textContent = L.mini(L.btn[btnIdx], fmtSec(interval));
+    $("pauseLabel").textContent = state === "paused" ? L.resume : L.pause;
+    $("heroState").textContent = heroOn ? L.heroOn(HERO_EVERY) : L.heroOff;
+    $("panicToast").textContent = L.panic;
+    renderStatus();
+  }
+  function renderStatus() {
+    let s = L.ready;
+    if (state === "running") s = lastMsg || L.clicking(clicks.toLocaleString(), fmtTime(elapsed()));
+    else if (state === "paused") s = L.paused(clicks.toLocaleString());
+    else if (state === "done") s = L.done(clicks.toLocaleString());
+    else if (state === "stopped") s = L.stopped(clicks.toLocaleString());
+    stText.textContent = s;
+    st.classList.toggle("on", state === "running");
+    startBtn.disabled = state === "running" || state === "paused";
+    pauseBtn.disabled = !(state === "running" || state === "paused");
+    stopBtn.disabled = pauseBtn.disabled;
+  }
+
+  function placeFixed() {
+    fixedMark.classList.toggle("on", posIdx === 1);
+    fixedMark.style.left = fixedPt.x * win.clientWidth + "px";
+    fixedMark.style.top = fixedPt.y * win.clientHeight + "px";
+  }
+  win.addEventListener("pointermove", (e) => { const r = win.getBoundingClientRect(); mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
+  win.addEventListener("pointerleave", () => (mouse = null));
+
+  function start() {
+    if (state === "running") return;
+    if (state === "paused") return resume();
+    clicks = 0; acc = 0; pausedTotal = 0; lastMsg = "";
+    startT = lastT = performance.now();
+    state = "running";
+    refreshTexts();
+    ensureTimer();
+  }
+  function pauseToggle() { if (state === "running") { state = "paused"; pausedAt = performance.now(); refreshTexts(); } else if (state === "paused") resume(); }
+  function resume() { pausedTotal += performance.now() - pausedAt; lastT = performance.now(); state = "running"; refreshTexts(); ensureTimer(); }
+  function stop(final) { if (state === "running" || state === "paused") { state = final || "stopped"; refreshTexts(); } }
+  function panic() {
+    stop("stopped");
+    heroOn = false;
+    $("heroLive").classList.add("off");
+    refreshTexts();
+    const t = $("panicToast");
+    t.classList.add("on");
+    clearTimeout(panic.tm);
+    panic.tm = setTimeout(() => t.classList.remove("on"), 1800);
+  }
+  // 클릭 '위치': 마우스가 있는 곳이면 커서 자리, 정해둔 곳이면 표시된 점
+  function clickPoint() {
+    if (posIdx === 1) return { x: fixedPt.x * win.clientWidth, y: fixedPt.y * win.clientHeight, own: false };
+    if (!mouse) return null;
+    // 앱처럼: Pulse 컨트롤(사이드바 · 카드 · 버튼) 위에서는 누르지 않는다
+    const el = document.elementFromPoint(mouse.x + win.getBoundingClientRect().left, mouse.y + win.getBoundingClientRect().top);
+    const own = !!(el && el.closest(".card, .bar, .pane, .seg, button, input"));
+    return { x: mouse.x, y: mouse.y, own };
+  }
+  // 화면 갱신 대신 타이머로 돈다: 탭이 가려져도 앱처럼 계속 센다
+  let timer = 0;
+  function ensureTimer() { if (!timer) timer = setInterval(() => loop(performance.now()), 16); }
+  function loop(now) {
+    if (state !== "running") { clearInterval(timer); timer = 0; return; }
+    const dt = Math.max(0, (now - lastT) / 1000);  // 탭이 가려져 프레임이 멈춰도 실제 흐른 시간만큼 센다 (앱처럼)
+    lastT = now;
+    acc += dt;
+    let n = Math.floor(acc / interval);
+    if (n > 0) {
+      acc -= n * interval;
+      const p = clickPoint();
+      if (p && !p.own) {
+        if (repIdx === 1) n = Math.min(n, Math.max(0, (parseInt(countInput.value, 10) || 1) - clicks));
+        clicks += n;
+        lastMsg = "";
+        if (now - lastSpawn > 33) { lastSpawn = now; ripple(layer, p.x, p.y, BTN_COLOR[btnIdx]); }  // 물결은 초당 30개까지만 그린다
+      } else if (p && p.own) lastMsg = L.ownWin;
+    }
+    renderStatus();
+    if (repIdx === 1 && clicks >= (parseInt(countInput.value, 10) || 1)) return stop("done");
+  }
+  startBtn.addEventListener("click", start);
+  pauseBtn.addEventListener("click", pauseToggle);
+  stopBtn.addEventListener("click", () => stop());
+  $("panicBtn").addEventListener("click", panic);
+  $("miniStart").addEventListener("click", () => { document.getElementById("try").scrollIntoView({ behavior: "smooth" }); setTimeout(start, 600); });
+
+  // 사이드바: 고른 메뉴로 유리 한 조각이 미끄러져 간다 (예시라 화면은 자동 클릭 그대로)
+  const navSel = $("navSel"), navBtns = [...document.querySelectorAll(".nv")];
+  function pickNav(i) {
+    const b = navBtns[i];
+    navSel.style.transform = `translateY(${b.offsetTop}px)`;
+  }
+  navBtns.forEach((b, i) => b.addEventListener("click", () => pickNav(i)));
+  requestAnimationFrame(() => pickNav(0));
+
+  // ---------------------------------------------------------------- 단축키 (페이지 안에서도)
+  addEventListener("keydown", (e) => {
+    const k = e.key;
+    if (!["F6", "F8", "F9"].includes(k)) return;
+    e.preventDefault();
+    const cap = document.querySelector(`.key[data-key="${k}"]`);
+    if (cap) { cap.classList.add("hit"); setTimeout(() => cap.classList.remove("hit"), 160); }
+    if (k === "F8") panic();
+    else if (k === "F6") {
+      if (!heroOn) { heroOn = true; $("heroLive").classList.remove("off"); refreshTexts(); }
+      if (state === "running" || state === "paused") stop(); else start();
+    }
+  });
+
+  // ---------------------------------------------------------------- 스크롤: 상단 막대 · 매크로 목록 · 큰 PULSE
+  const topbar = $("topbar"), bigw = $("bigw"), acts = $("acts");
+  [...acts.children].forEach((a, i) => (a.style.transitionDelay = i * 0.12 + "s"));
+  new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && acts.classList.add("in")), { threshold: 0.4 }).observe(acts);
+  let ticking = false;
+  function onScroll() {
+    ticking = false;
+    topbar.classList.toggle("scrolled", scrollY > 20);
+    if (!reduce) {
+      const br = bigw.getBoundingClientRect();
+      bigw.style.setProperty("--x", (((br.top - innerHeight) / innerHeight) * 180 - 60).toFixed(1));
+    }
+  }
+  addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
+  onScroll();
+
+  // 언어: 기기 언어를 따르고, 고르면 기억한다. ?lang=en 링크로 영어를 바로 보낼 수 있다.
+  let startLang = (navigator.language || "ko").toLowerCase().startsWith("ko") ? "ko" : "en";
+  try { startLang = localStorage.getItem("pulse-lang") || startLang; } catch (e) { /* 기기 언어로 */ }
+  const qLang = new URLSearchParams(location.search).get("lang");
+  if (qLang === "en" || qLang === "ko") startLang = qLang;
+  document.querySelectorAll(".lang button").forEach((b) => b.addEventListener("click", () => setLang(b.dataset.l)));
+  setLang(startLang);
+  placeFixed();
+</script>
+</body>
+</html>
